@@ -1,0 +1,28 @@
+{
+    "name": "gavtaylor/sievefolders",
+    "type": "roundcube-plugin",
+    "description": "Keep Sieve filters pointing at the right folder when a folder is renamed or moved in Roundcube",
+    "keywords": ["roundcube", "roundcubemail", "webmail", "plugin", "sieve", "managesieve", "filters", "folders", "dovecot"],
+    "homepage": "https://github.com/gavtaylor/roundcube-sievefolders",
+    "license": "GPL-3.0-or-later",
+    "authors": [
+        {
+            "name": "Gavin Taylor",
+            "homepage": "https://github.com/gavtaylor"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/gavtaylor/roundcube-sievefolders/issues",
+        "source": "https://github.com/gavtaylor/roundcube-sievefolders"
+    },
+    "require": {
+        "php": ">=8.1.0",
+        "roundcube/plugin-installer": "~0.3.5"
+    },
+    "autoload": {
+        "classmap": [
+            "sievefolders.php",
+            "sievefolders_rewriter.php"
+        ]
+    }
+}

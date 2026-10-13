@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""
+sieve-target-check -- report Sieve `fileinto` rules whose folder no longer
+exists, for every account with an active Sieve script.
+
+The sievefolders Roundcube plugin keeps filters in step with folders renamed
+*in Roundcube*; a folder renamed in any other IMAP client (a phone,
+Thunderbird) never reaches Roundcube, so its filters silently stop working
+and the mail falls back to INBOX. This catches those, whichever client did it.
+
+Run as root (needs doveadm and the vmail-owned scripts). Read-only: it never
+changes a script or a mailbox. Prints a report and exits 1 if anything is
+broken; with --notify ADDRESS it also emails that report (only when there is
+something to report) via the local sendmail.
+
+    sieve-target-check [--sieve-root DIR] [--notify ADDRESS] [--from ADDRESS]
+
+Assumes Pigeonhole's per-user layout <root>/<domain>/<user>/.dovecot.sieve
+(the active-script symlink) and managesieve's default folder encoding
+(modified UTF-7), which `doveadm mailbox list -7` matches.
+"""
+
+import argparse
+import glob
+import os
+import re
+import subprocess
+import sys
+from email.message import EmailMessage
+
+# fileinto, optional tagged args (:copy, :create, :flags "..."), quoted name.
+FILEINTO = re.compile(
+    r'\bfileinto\b((?:\s+:[a-z]+(?:\s+"(?:[^"\\]|\\.)*")?)*)\s+"((?:[^"\\]|\\.)*)"',
+    re.IGNORECASE,
+)
+
+
+def unescape(value):
+    return re.sub(r'\\(.)', r'\1', value, flags=re.S)
+
+
+def strip_comments(script):
+    # Whole-line comments only: a '#' can legitimately appear inside a quoted
+    # folder or header value further along a line.
+    return re.sub(r'(?m)^\s*#.*$', '', script)
+
+
+def targets(script):
+    found = set()
+    for tags, name in FILEINTO.findall(strip_comments(script)):
+        # :create makes the server create a missing folder itself.
+        if ':create' in tags.lower():
+            continue
+        found.add(unescape(name))
+    return found
+
+
+def folders(user):
+    out = subprocess.run(
+        ['doveadm', 'mailbox', 'list', '-7', '-u', user],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, check=True,
+    ).stdout
+    return {line for line in out.splitlines() if line}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
+    parser.add_argument('--sieve-root', default='/var/vmail/sieve')
+    parser.add_argument('--notify', help='email the report to this address when something is broken')
+    parser.add_argument('--from', dest='sender', default='root', help='From address for --notify')
+    args = parser.parse_args()
+
+    problems = []
+    for active in sorted(glob.glob(os.path.join(args.sieve_root, '*', '*', '.dovecot.sieve'))):
+        domain, local = active.split(os.sep)[-3:-1]
+        user = '{}@{}'.format(local, domain)
+        try:
+            with open(active, encoding='utf-8', errors='replace') as fh:
+                wanted = targets(fh.read())
+            existing = folders(user)
+        except (OSError, subprocess.CalledProcessError) as err:
+            problems.append('{}: could not check ({})'.format(user, err))
+            continue
+
+        for name in sorted(wanted - existing - {'INBOX'}):
+            problems.append('{}: a filter files into "{}", which does not exist'.format(user, name))
+
+    if not problems:
+        return 0
+
+    report = ('These Sieve filter rules point at folders that no longer exist. '
+              'Until they are fixed (Settings > Filters), mail they would have filed '
+              'stays in the Inbox.\n\n' + '\n'.join(problems) + '\n')
+    sys.stdout.write(report)
+
+    if args.notify:
+        msg = EmailMessage()
+        msg['Subject'] = 'Mail filters pointing at missing folders'
+        msg['From'] = args.sender
+        msg['To'] = args.notify
+        msg.set_content(report)
+        subprocess.run(['/usr/sbin/sendmail', '-t', '-oi'], input=msg.as_bytes(), check=True)
+
+    return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

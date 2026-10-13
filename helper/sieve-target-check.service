@@ -1,0 +1,11 @@
+# Reports Sieve filters whose target folder no longer exists. Read-only.
+# Set --notify/--from for your install.
+[Unit]
+Description=Check Sieve filters for missing target folders
+After=dovecot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sieve-target-check --notify postmaster@example.com --from postmaster@example.com
+# Exit 1 just means "problems found and reported" -- not a unit failure.
+SuccessExitStatus=1
